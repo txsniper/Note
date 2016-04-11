@@ -2,6 +2,8 @@
 #define XTHREAD_COMMON_OBJECT_POOL_H
 #include <cstddef>
 #include <atomic>
+#include "../base/lock.h"
+#include "../base/lock_guard.h"
 namespace xthread
 {
 
@@ -24,6 +26,36 @@ namespace base
 
     template <typename T> struct ObjectPoolFreeChunkMaxItemDynamic {
         static size_t value() { return 0; }
+    };
+
+    template <typename T> struct ObjectPoolConfig {
+        static const size_t OBJECT_POOL_BLOCK_MAX_SIZE      = 128 * 1024;
+        static const size_t OBJECT_POOL_BLOCK_MAX_ITEM      = 512;
+        static const size_t OBJECT_POOL_FREE_CHUNK_MAX_ITEM = 0;
+
+        static size_t getObjectPoolBlockItemNum() {
+
+            // step1 : 根据Block内存空间的大小计算最多可以分配多少个Object
+            size_t n1 = OBJECT_POOL_BLOCK_MAX_SIZE / sizeof(T);
+
+            // step2 : 处理特殊情况
+            size_t n2 = (n1 < 1 ? 1 : n1);
+
+            // step3: 不能超过每个Block最大的对象数
+            return (n2 > OBJECT_POOL_BLOCK_MAX_ITEM) ?
+                    OBJECT_POOL_BLOCK_MAX_ITEM : n2;
+        }
+
+        // 每个Block分配的ITEM数量
+        static const size_t BLOCK_ITEM_NUM = getObjectPoolBlockItemNum();
+
+        static size_t getObjectPoolFreeChunkItemNum() {
+            return (OBJECT_POOL_FREE_CHUNK_MAX_ITEM > 0) ?
+            OBJECT_POOL_FREE_CHUNK_MAX_ITEM : BLOCK_ITEM_NUM;
+        }
+
+        // Free Chunk最大的ITEM数量
+        static const size_t FREE_CHUNK_ITEM_NUM = getObjectPoolFreeChunkItemNum();
     };
 
 
@@ -76,40 +108,10 @@ namespace base
     static const size_t OP_INITIAL_FREE_LIST_SIZE = 1024;
 
     template <typename T>
-    class ObjectPoolBlockItemNum {
-        private :
-            static const size_t N1 = ObjectPoolBlockMaxSize<T>::value / sizeof(T);
-            static const size_t N2 = (N1 < 1 ? 1 : N1);
-        public:
-            static const size_t value = (N2 > ObjectPoolBlockMaxItem<T>::value ?
-                                         ObjectPoolBlockMaxItem<T>::value : N2);
-    };
-
-    template <typename T>
-    size_t getObjectPoolBlockItemNum() {
-
-        // step1 : 根据Block内存空间的大小计算最多可以分配多少个Object
-        size_t n1 = ObjectPoolBlockMaxSize<T>::value / sizeof(T);
-
-        // step2 : 处理特殊情况
-        size_t n2 = (n1 < 1 ? 1 : n1);
-
-        // step3: 不能超过每个Block最大的对象数
-        return (n2 > ObjectPoolBlockMaxItem<T>::value ?
-                ObjectPoolBlockMaxItem<T>::value : n2);
-    }
-
-    template <typename T>
     class ObjectPool {
     public:
-        // 每个Block分配的ITEM数量
-        static const size_t BLOCK_NITEM = getObjectPoolBlockItemNum<T>();
-
-        // Free Chunk最大的ITEM数量
-        static const size_t FREE_CHUNK_NITEM =
-            ObjectPoolFreeChunkMaxItem<T>::value > 0 ?
-            ObjectPoolFreeChunkMaxItem<T>::value : BLOCK_NITEM;
-
+        static const size_t BLOCK_NITEM         = ObjectPoolConfig<T>::BLOCK_ITEM_NUM;
+        static const size_t FREE_CHUNK_NITEM    = ObjectPoolConfig<T>::FREE_CHUNK_ITEM_NUM;
         // 空闲的对象在进入全局空闲列表之前先放在这里
         typedef ObjectPoolFreeChunk<T, FREE_CHUNK_NITEM> FreeChunk;
 
@@ -150,6 +152,8 @@ namespace base
                 FreeChunk cur_free_;
         };
 
+    public:
+        static ObjectPool* getInstance();
     private:
         ObjectPool() {
 
@@ -157,7 +161,23 @@ namespace base
 
     private:
         static std::atomic<ObjectPool*> singleton_;
+        static MutexLock singleton_lock_;
+        static thread_local LocalPool* local_pool_;
     };
+
+    template <typename T>
+    ObjectPool<T>* ObjectPool<T>::getInstance() {
+        ObjectPool<T>* instance = singleton_.load(std::memory_order_consume);
+        if (instance){
+            return instance;
+        }
+        MutexGuard<MutexLock> g(singleton_lock_);
+        if (!instance) {
+            instance = new ObjectPool<T>();
+            singleton_.store(instance, std::memory_order_release);
+        }
+        return instance;
+    }
 
 }
 }
