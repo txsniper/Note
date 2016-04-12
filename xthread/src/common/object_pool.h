@@ -2,6 +2,7 @@
 #define XTHREAD_COMMON_OBJECT_POOL_H
 #include <cstddef>
 #include <atomic>
+#include <vector>
 #include "../base/lock.h"
 #include "../base/lock_guard.h"
 namespace xthread
@@ -159,11 +160,23 @@ namespace base
 
         }
 
+        bool pop_free_chunk(FreeChunk& c);
+        bool push_free_chunk(const FreeChunk& c);
+
     private:
         static std::atomic<ObjectPool*> singleton_;
-        static MutexLock singleton_lock_;
-        static thread_local LocalPool* local_pool_;
+        static MutexLock                singleton_lock_;
+        static thread_local LocalPool*  local_pool_;
+
+        MutexLock               free_chunks_lock_;
+        std::vector<FreeChunk*> free_chunks_;
     };
+
+    template <typename T>
+    std::atomic<ObjectPool<T>*> ObjectPool<T>::singleton_(NULL);
+
+    template <typename T>
+    MutexLock ObjectPool<T>::singleton_lock_;
 
     template <typename T>
     ObjectPool<T>* ObjectPool<T>::getInstance() {
@@ -177,6 +190,35 @@ namespace base
             singleton_.store(instance, std::memory_order_release);
         }
         return instance;
+    }
+
+    template <typename T>
+    bool ObjectPool<T>::pop_free_chunk(FreeChunk& c) {
+        // 如果为空,则直接返回(可能漏掉当前别的线程正在插入的情况)
+        // 如果大量的线程请求这里,这里直接不加锁判断可以降低锁争用
+        if (free_chunks_.empty()) {
+            return false;
+        }
+        MutexGuard<MutexLock> g(free_chunks_lock_);
+        if (free_chunks_.empty()) {
+            return false;
+        }
+        FreeChunk* p = free_chunks_.back();
+        free_chunks_.pop_back();
+        c = *p;
+        delete p;
+        return true;
+    }
+
+    template <typename T>
+    bool ObjectPool<T>::push_free_chunk(const FreeChunk& c) {
+        FreeChunk* c2 = new (std::nothrow) FreeChunk(c);
+        if (c2 == NULL) {
+            return false;
+        }
+        MutexGuard<MutexLock> g(free_chunks_lock_);
+        free_chunks_.push_back(c2);
+        return true;
     }
 
 }
