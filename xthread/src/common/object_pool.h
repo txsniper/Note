@@ -5,6 +5,8 @@
 #include <vector>
 #include "../base/lock.h"
 #include "../base/lock_guard.h"
+#include "macros.h"
+
 namespace xthread
 {
 
@@ -163,6 +165,8 @@ namespace base
         bool pop_free_chunk(FreeChunk& c);
         bool push_free_chunk(const FreeChunk& c);
 
+        LocalPool* get_or_new_local_pool();
+
     private:
         static std::atomic<ObjectPool*> singleton_;
         static MutexLock                singleton_lock_;
@@ -219,6 +223,19 @@ namespace base
         MutexGuard<MutexLock> g(free_chunks_lock_);
         free_chunks_.push_back(c2);
         return true;
+    }
+
+    template <typename T>
+    typename ObjectPool<T>::LocalPool* ObjectPool<T>::get_or_new_local_pool() {
+        ObjectPool<T>::LocalPool* lp = local_pool_;
+        if (likely(lp != NULL)) {
+            return lp;
+        }
+        lp = new(std::nothrow) LocalPool(this);
+        if (lp == NULL) {
+            return NULL;
+        }
+        local_pool_ = lp;
     }
 
 }
