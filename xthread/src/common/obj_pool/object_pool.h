@@ -108,6 +108,38 @@ namespace base
                     if (nlocal_.fetch_sub(1, std::memory_order_relaxed)) {
                         return;
                     }
+#ifdef XTHREAD_CLEAR_OBJECT_POOL_AFTER_ALL_THREADS_QUIT
+                    // 这里加锁同步, 与 get_or_new_local_pool 互斥
+                    MutexGuard<MutexLock> guard(local_pool_mutex);
+                    if (nlocal_.load(std::memory_order_relaxed) != 0) {
+                        return;
+                    }
+                    FreeChunk dummy;
+                    while (pop_free_chunk(dummy));
+
+                    // 释放内存
+                    const size_t ngroup = ngroup_.exchange(0, std::memory_order_relaxed);
+                    for(size_t i = 0; i < ngroup; ++i) {
+                        BlockGroup* bg = block_groups_[i].load(std::memory_order_relaxed);
+                        if (bg == NULL) {
+                            break;
+                        }
+                        size_t nblock = std::min(bg->nblock.load(std::memory_order_relaxed), OP_GROUP_NBLOCK);
+                        for (size_t j = 0; j < nblock; ++j) {
+                            Block* b = bg->blocks_[j].load(std::memory_order_relaxed);
+                            if ( NULL == b) {
+                                continue;
+                            }
+                            for (size_t k = 0; k < b->nitem; ++k) {
+                                T* const objs = (T*)b->items;
+                                objs[k].~T();
+                            }
+                            delete b;
+                        }
+                        delete bg;
+                    }
+                    memset(block_groups_, 0, sizeof(std::aotimic<BlockGroup*>) * OP_MAX_BLOCK_NGROUP);
+#endif
                 }
 
                 static void deleteLocalPool(void* lp) {
