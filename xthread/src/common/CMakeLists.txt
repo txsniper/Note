@@ -4,6 +4,8 @@ set(HEADERS
     timer_thread.h
     util.h
     log.h
+    ./obj_pool/object_pool.h
+    ./obj_pool/object_pool_config.h
 )
 install(FILES ${HEADERS} DESTINATION include/xthread/common)
 
