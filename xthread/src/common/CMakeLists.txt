@@ -5,6 +5,7 @@ set(HEADERS
     util.h
     log.h
     ./obj_pool/object_pool.h
+    ./obj_pool/object_pool_in.h
     ./obj_pool/object_pool_config.h
 )
 install(FILES ${HEADERS} DESTINATION include/xthread/common)
