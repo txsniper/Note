@@ -1,2 +1,4 @@
 add_executable(test_timer_thread test_timer_thread.cpp)
 target_link_libraries(test_timer_thread xthread_common xthread_base pthread gtest)
+add_executable(test_object_pool test_object_pool.cpp)
+target_link_libraries(test_object_pool xthread_common xthread_base pthread gtest)
