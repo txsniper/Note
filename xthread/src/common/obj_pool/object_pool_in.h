@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <atomic>
 #include <vector>
+#include <cstdio>
+#include <string>
 #include "../../base/lock.h"
 #include "../../base/lock_guard.h"
 #include "../../base/thread_exit_helper.h"
@@ -183,6 +185,12 @@ namespace xthread
                                 return -1;
                             }
 
+                            inline std::string getLocalPoolInfo()const {
+                                const size_t max_size = 256;
+                                char str[max_size] = {0};
+                                ::snprintf(str, max_size, "pool[%p], local_pool[%p], cur_block[%p], cur_block_index[%d], FreeChunk.nfree[%d]", pool_, this, cur_block_, cur_block_index_, cur_free_.nfree);
+                                return str;
+                           }
                         private:
                             // 全局pool
                             ObjectPool* pool_;
@@ -200,6 +208,8 @@ namespace xthread
                     LocalPool* get_or_new_local_pool();
                     static Block*   add_block(size_t* index);
                     static bool     add_block_group(size_t old_ngroup);
+                    ObjectPoolInfo get_object_pool_info() const;
+                    
                     inline T* get_object() {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp != NULL)) {
@@ -207,6 +217,7 @@ namespace xthread
                         }
                         return NULL;
                     }
+                    
 
                     template <typename A1>
                         inline T* get_object(const A1& a1) {
@@ -241,6 +252,11 @@ namespace xthread
                             registerThreadExitFunc(LocalPool::deleteLocalPool, static_cast<void*>(lp));
                             delete lp;
                         }
+                    }
+
+                    std::string get_local_pool_info() {
+                        LocalPool* lp = get_or_new_local_pool();
+                        return lp->getLocalPoolInfo();
                     }
 
                     void clear_local_pool() {
@@ -431,6 +447,37 @@ namespace xthread
                 }
                 return bg != NULL;
             }
+
+        template <typename T>
+        ObjectPoolInfo ObjectPool<T>::get_object_pool_info() const
+        {
+            ObjectPoolInfo info;
+            info.local_pool_num = nlocal_.load(std::memory_order_relaxed);
+            size_t ngroup = ngroup_.load(std::memory_order_acquire);
+            info.block_group_num = ngroup;
+            info.block_num = 0;
+            info.block_item_num = 0;
+            info.item_num = 0;
+#ifdef XTHREAD_OBJECT_POOL_NEED_FREE_ITEM_NUM
+            info.free_item_num = _global_nfree.load(std::memory_order_relaxed);
+#endif
+            for(size_t i = 0; i < ngroup; ++i) {
+                BlockGroup* group = block_groups_[i].load(std::memory_order_consume);
+                // 已经分配的Block只会被移动，不会被其他线程释放,因此不用考虑在group被其他线程释放导致崩溃的情况
+                if (group) {
+                    size_t nblock = group->nblock.load(std::memory_order_relaxed);
+                    info.block_num += nblock;
+                    for(size_t j = 0; j < nblock; ++j) {
+                        Block* block = group->blocks[j].load(std::memory_order_consume);
+                        if (block) {
+                            info.block_item_num += block->nitem;
+                            info.item_num += block->nitem;
+                        }
+                    }
+                }
+            }
+            return info;
+        }
     }
 }
 #endif

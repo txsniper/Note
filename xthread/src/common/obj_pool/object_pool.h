@@ -29,6 +29,12 @@ template <typename T>
 inline void clear_objects() {
     return ObjectPool<T>::getInstance()->clear_objects();
 }
+
+template <typename T>
+std::string get_local_pool_info() {
+    return ObjectPool<T>::getInstance()->get_local_pool_info();
+}
+
 }
 }
 #endif
