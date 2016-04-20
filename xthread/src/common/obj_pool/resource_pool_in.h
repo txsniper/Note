@@ -61,8 +61,14 @@ namespace xthread
                     {
                         public:
                             LocalPool(ResourcePool* pool)
-                                : pool_(pool) {
-                                }
+                                : pool_(pool), local_block_(NULL), local_block_index_(0){
+                            }
+
+                            ~LocalPool() {
+                                pool_->push_free_chunk(local_free_);
+                            }
+                        private:
+
                         private:
                             ResourcePool* pool_;
                             FreeChunkItems<T> local_free_;
@@ -76,6 +82,8 @@ namespace xthread
                     LocalPool* get_or_new_local_pool();
                     ResourceBlock<T>* getBlock(size_t* index);
                     bool addGroup(size_t curr_ngroup);
+
+                    void push_free_chunk(const FreeChunkItems<T>& curr_free);
                 private:
                     ResourcePool() {
                         free_list_.reserve(FREE_LIST_INIT_NUM);
@@ -190,6 +198,11 @@ namespace xthread
                 }
                 local_pool_ = lp;
                 return lp;
+            }
+
+        template <typename T>
+            void ResourcePool<T>::push_free_chunk(const FreeChunkItems<T>& curr_free) {
+
             }
     }
 }

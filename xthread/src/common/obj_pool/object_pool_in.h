@@ -116,7 +116,6 @@ namespace xthread
                             }
 
 
-
                             static void deleteLocalPool(void* lp) {
                                 delete static_cast<LocalPool*>(lp);
                             }
@@ -188,7 +187,7 @@ namespace xthread
                             inline std::string getLocalPoolInfo()const {
                                 const size_t max_size = 256;
                                 char str[max_size] = {0};
-                                ::snprintf(str, max_size, "pool[%p], local_pool[%p], cur_block[%p], cur_block_index[%d], FreeChunk.nfree[%d]", pool_, this, cur_block_, cur_block_index_, cur_free_.nfree);
+                                ::snprintf(str, max_size, "pool[%p], local_pool[%p], cur_block[%p], cur_block_index[%zd], FreeChunk.nfree[%zd]", pool_, this, cur_block_, cur_block_index_, cur_free_.nfree);
                                 return str;
                            }
                         private:
@@ -209,7 +208,7 @@ namespace xthread
                     static Block*   add_block(size_t* index);
                     static bool     add_block_group(size_t old_ngroup);
                     ObjectPoolInfo get_object_pool_info() const;
-                    
+
                     inline T* get_object() {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp != NULL)) {
@@ -217,7 +216,7 @@ namespace xthread
                         }
                         return NULL;
                     }
-                    
+
 
                     template <typename A1>
                         inline T* get_object(const A1& a1) {

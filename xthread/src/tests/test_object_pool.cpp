@@ -33,5 +33,5 @@ TEST_F(ObjectPoolTest, create_data) {
     xthread::base::return_object<TestObject>(a);
     xthread::base::return_object<TestObject>(b);
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
-    std::cout<< info_str;
+    std::cout<< info_str<<std::endl;
 }
