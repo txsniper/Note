@@ -4,6 +4,7 @@
 #include <atomic>
 #include <vector>
 #include "../macros.h"
+#include "../../base/thread_exit_helper.h"
 #include "../../base/lock.h"
 #include "../../base/lock_guard.h"
 namespace xthread
@@ -53,7 +54,7 @@ namespace xthread
         template <typename T>
             class ResourcePool {
                 public:
-                    typedef std::vector<FreeChunkItems<T> > FreeChunkList;
+                    typedef std::vector<FreeChunkItems<T>* > FreeChunkList;
                     static const size_t MAX_GROUP_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_NUM;
                     static const size_t FREE_LIST_INIT_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_LIST_INIT_NUM;
 
@@ -83,11 +84,16 @@ namespace xthread
                     ResourceBlock<T>* getBlock(size_t* index);
                     bool addGroup(size_t curr_ngroup);
 
-                    void push_free_chunk(const FreeChunkItems<T>& curr_free);
+                    bool push_free_chunk(const FreeChunkItems<T>& curr_free);
+                    bool pop_free_chunk(FreeChunkItems<T>& ret_free);
                 private:
                     ResourcePool() {
                         free_list_.reserve(FREE_LIST_INIT_NUM);
                     };
+
+                    static void deleteLocalPool(void* arg) {
+                        delete reinterpret_cast<LocalPool*>(arg);
+                    }
 
                 private:
                     static std::atomic<ResourcePool*> instance_;
@@ -197,12 +203,35 @@ namespace xthread
                     return NULL;
                 }
                 local_pool_ = lp;
+                registerThreadExitFunc(ResourcePool<T>::deleteLocalPool, reinterpret_cast<void*>(lp));
                 return lp;
             }
 
         template <typename T>
-            void ResourcePool<T>::push_free_chunk(const FreeChunkItems<T>& curr_free) {
+            bool ResourcePool<T>::push_free_chunk(const FreeChunkItems<T>& curr_free) {
+                FreeChunkItems<T>* newFreeChunkItems = new (std::nothrow) FreeChunkItems<T>(curr_free);
+                if (!newFreeChunkItems) {
+                    return false;
+                }
+                MutexGuard<MutexLock> guard(free_list_lock_);
+                free_list_.push_back(newFreeChunkItems);
+                return true;
+            }
 
+        template <typename T>
+            bool ResourcePool<T>::pop_free_chunk(FreeChunkItems<T>& ret_free) {
+                if (free_list_.empty()) {
+                    return false;
+                }
+                MutexGuard<MutexLock> guard(free_list_lock_);
+                if (free_list_.empty()) {
+                    return false;
+                }
+                FreeChunkItems<T> *p = free_list_.back();
+                free_list_.pop_back();
+                ret_free = *p;
+                delete p;
+                return true;
             }
     }
 }
