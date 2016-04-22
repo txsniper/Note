@@ -7,6 +7,7 @@
 #include "../../base/thread_exit_helper.h"
 #include "../../base/lock.h"
 #include "../../base/lock_guard.h"
+#include "macro_defines.h"
 namespace xthread
 {
     namespace base
@@ -68,7 +69,17 @@ namespace xthread
                             ~LocalPool() {
                                 pool_->push_free_chunk(local_free_);
                             }
-                        private:
+
+                        public:
+
+                            T* get_object() {
+
+                            }
+
+                            template <typename A1>
+                            T* get_object(const A1& a1) {
+                                GET_OBJECT((a1));
+                            }
 
                         private:
                             ResourcePool* pool_;
