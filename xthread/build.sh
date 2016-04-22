@@ -1,5 +1,6 @@
 #!/bin/bash
 set -x
+BOOST_ROOT=/usr/lib/boost-1.60/
 SOURCE_DIR=`pwd`
 BUILD_DIR=${BUILD_DIR:-build}
 BUILD_TYPE=${BUILD_TYPE:-debug}

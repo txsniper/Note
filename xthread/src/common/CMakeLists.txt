@@ -7,6 +7,9 @@ set(HEADERS
     ./obj_pool/object_pool.h
     ./obj_pool/object_pool_in.h
     ./obj_pool/object_pool_config.h
+    ./obj_pool/resource_pool.h
+    ./obj_pool/resource_pool_in.h
+    ./obj_pool/macro_defines.h
 )
 install(FILES ${HEADERS} DESTINATION include/xthread/common)
 

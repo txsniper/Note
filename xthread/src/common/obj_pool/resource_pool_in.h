@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <atomic>
 #include <vector>
+#include <string>
 #include "../macros.h"
 #include "../../base/thread_exit_helper.h"
 #include "../../base/lock.h"
 #include "../../base/lock_guard.h"
-#include "macro_defines.h"
 namespace xthread
 {
     namespace base
@@ -32,71 +32,121 @@ namespace xthread
             };
 
         template <typename T>
-            struct FreeChunkItems
-            {
-                size_t nitems;
-                T*     items[ResourcePoolConfig<T>::RESOURCE_POOL_FREE_CHUNK_ITEM_NUM];
-            };
-
-        template <typename T>
-            struct ResourceBlock
-            {
-                size_t  nitem;
-                char    items[sizeof(T) * ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM];
-            };
-
-        template <typename T>
-            struct ResourceBlockGroup
-            {
-                std::atomic<size_t> nblock;
-                std::atomic<ResourceBlock<T>*> blocks[ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_BLOCK_NUM];
-            };
-
-        template <typename T>
             class ResourcePool {
                 public:
-                    typedef std::vector<FreeChunkItems<T>* > FreeChunkList;
-                    static const size_t MAX_GROUP_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_NUM;
-                    static const size_t FREE_LIST_INIT_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_LIST_INIT_NUM;
+                    static const size_t FREE_CHUNK_ITEM_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_CHUNK_ITEM_NUM;
+                    static const size_t MAX_GROUP_NUM       = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_NUM;
+                    static const size_t BLOCK_ITEM_NUM      = ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM;
+                    static const size_t FREE_LIST_INIT_NUM  = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_LIST_INIT_NUM;
+                    static const size_t GROUP_BLOCK_NUM     = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_BLOCK_NUM;
+                    struct FreeChunkItems
+                    {
+                        size_t nitems;
+                        T*     items[FREE_CHUNK_ITEM_NUM];
+                    };
+
+                    struct ResourceBlock
+                    {
+                        size_t  nitem;
+                        char    items[sizeof(T) * BLOCK_ITEM_NUM];
+                    };
+
+                    struct ResourceBlockGroup
+                    {
+                        std::atomic<size_t> nblock;
+                        std::atomic<ResourceBlock*> blocks[GROUP_BLOCK_NUM];
+                    };
+
+                    typedef std::vector<FreeChunkItems*> FreeChunkList;
+
+                public:
+                    ResourceBlock* getBlock(size_t* index);
+                    bool addGroup(size_t curr_ngroup);
+                    bool push_free_chunk(const FreeChunkItems& curr_free);
+                    bool pop_free_chunk(FreeChunkItems& ret_free);
 
                     class LocalPool
                     {
                         public:
                             LocalPool(ResourcePool* pool)
                                 : pool_(pool), local_block_(NULL), local_block_index_(0){
-                            }
+                                }
 
                             ~LocalPool() {
-                                pool_->push_free_chunk(local_free_);
+                                if (local_free_.nitems > 0) {
+                                    pool_->push_free_chunk(local_free_);
+                                }
                             }
 
-                        public:
+                            #include "macro_defines.h"
+                            bool return_object(T* ptr) {
+                                if (local_free_.nitems < FREE_CHUNK_ITEM_NUM) {
+                                    local_free_.items[local_free_.nitems++] = ptr;
+                                    return true;
+                                }
+                                else {
+                                    bool ret = pool_->push_free_chunk(local_free_);
+                                    if (ret) {
+                                        local_free_.items[local_free_.nitems++] = ptr;
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }
 
                             T* get_object() {
-
+                                GET_OBJECT_NEW();
                             }
 
                             template <typename A1>
                             T* get_object(const A1& a1) {
-                                GET_OBJECT((a1));
+                                GET_OBJECT_NEW((a1));
                             }
 
+                            template <typename A1, typename A2>
+                            T* get_object(const A1& a1, const A2& a2) {
+                                GET_OBJECT_NEW(a1,a2);
+                            }
+
+                            inline std::string getLocalPoolInfo()const {
+                                const size_t max_size = 256;
+                                char str[max_size] = {0};
+                                ::snprintf(str, max_size, "pool[%p], local_pool[%p], cur_block[%p], cur_block_index[%zd], FreeChunk.nfree[%zd]", pool_, this, local_block_, local_block_index_, local_free_.nitems);
+                                return str;
+                           }
+
                         private:
-                            ResourcePool* pool_;
-                            FreeChunkItems<T> local_free_;
-                            ResourceBlock<T>* local_block_;
-                            size_t local_block_index_;
+                            ResourcePool*   pool_;
+                            FreeChunkItems  local_free_;
+                            ResourceBlock*  local_block_;
+                            size_t          local_block_index_;
                     };
                     friend class LocalPool;
                 public:
                     static ResourcePool* getInstance();
 
                     LocalPool* get_or_new_local_pool();
-                    ResourceBlock<T>* getBlock(size_t* index);
-                    bool addGroup(size_t curr_ngroup);
 
-                    bool push_free_chunk(const FreeChunkItems<T>& curr_free);
-                    bool pop_free_chunk(FreeChunkItems<T>& ret_free);
+                    T* get_object() {
+                        LocalPool* lp = get_or_new_local_pool();
+                        if (likely(lp)) {
+                            return lp->get_object();
+                        }
+                        return NULL;
+                    }
+
+                    bool return_object(T* ptr) {
+                        LocalPool* lp = get_or_new_local_pool();
+                        if (likely(lp)) {
+                            return lp->return_object(ptr);
+                        }
+                        return false;
+                    }
+                    
+                    std::string get_local_pool_info() {
+                        LocalPool* lp = get_or_new_local_pool();
+                        return lp->getLocalPoolInfo();
+                    }
                 private:
                     ResourcePool() {
                         free_list_.reserve(FREE_LIST_INIT_NUM);
@@ -104,6 +154,7 @@ namespace xthread
 
                     static void deleteLocalPool(void* arg) {
                         delete reinterpret_cast<LocalPool*>(arg);
+                        local_pool_ = NULL;
                     }
 
                 private:
@@ -115,7 +166,7 @@ namespace xthread
                     static thread_local LocalPool* local_pool_;
 
                     static std::atomic<size_t> ngroup_;
-                    static std::atomic<ResourceBlockGroup<T>*> groups_[MAX_GROUP_NUM];
+                    static std::atomic<ResourceBlockGroup*> groups_[MAX_GROUP_NUM];
                     static MutexLock groups_lock_;
             };
 
@@ -132,7 +183,7 @@ namespace xthread
             std::atomic<size_t> ResourcePool<T>::ngroup_(0);
 
         template <typename T>
-            std::atomic<ResourceBlockGroup<T>*> ResourcePool<T>::groups_[ResourcePool<T>::MAX_GROUP_NUM] = {};
+            std::atomic<typename ResourcePool<T>::ResourceBlockGroup*> ResourcePool<T>::groups_[ResourcePool<T>::MAX_GROUP_NUM] = {};
         template <typename T>
             MutexLock ResourcePool<T>::groups_lock_;
 
@@ -151,18 +202,18 @@ namespace xthread
             }
 
         template <typename T>
-            ResourceBlock<T>* ResourcePool<T>::getBlock(size_t* index) {
-                ResourceBlock<T>* newBlock = new (std::nothrow) ResourceBlock<T>;
+            typename ResourcePool<T>::ResourceBlock* ResourcePool<T>::getBlock(size_t* index) {
+                ResourceBlock* newBlock = new (std::nothrow) ResourceBlock;
                 if (!newBlock) {
                     return NULL;
                 }
 
-                const size_t GROUP_NBLOCK = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_BLOCK_NUM;
+                const size_t GROUP_NBLOCK = GROUP_BLOCK_NUM;
                 size_t ngroup = 0;
                 do {
                     ngroup = ngroup_.load(std::memory_order_acquire);
                     if ((ngroup >= 1) && (ngroup < MAX_GROUP_NUM)) {
-                        ResourceBlockGroup<T>* group = groups_[ngroup - 1].load(std::memory_order_acquire);
+                        ResourceBlockGroup* group = groups_[ngroup - 1].load(std::memory_order_acquire);
                         if (group) {
                             size_t block_index = group->nblock.fetch_add(1, std::memory_order_relaxed);
                             if (block_index < ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM) {
@@ -192,7 +243,7 @@ namespace xthread
                     return true;
                 }
                 if (ngroup < MAX_GROUP_NUM) {
-                    ResourceBlockGroup<T>* newGroup = new (std::nothrow) ResourceBlockGroup<T>;
+                    ResourceBlockGroup* newGroup = new (std::nothrow) ResourceBlockGroup;
                     if (!newGroup) {
                         return false;
                     }
@@ -219,8 +270,8 @@ namespace xthread
             }
 
         template <typename T>
-            bool ResourcePool<T>::push_free_chunk(const FreeChunkItems<T>& curr_free) {
-                FreeChunkItems<T>* newFreeChunkItems = new (std::nothrow) FreeChunkItems<T>(curr_free);
+            bool ResourcePool<T>::push_free_chunk(const typename ResourcePool<T>::FreeChunkItems& curr_free) {
+                FreeChunkItems* newFreeChunkItems = new (std::nothrow) FreeChunkItems(curr_free);
                 if (!newFreeChunkItems) {
                     return false;
                 }
@@ -230,7 +281,7 @@ namespace xthread
             }
 
         template <typename T>
-            bool ResourcePool<T>::pop_free_chunk(FreeChunkItems<T>& ret_free) {
+            bool ResourcePool<T>::pop_free_chunk(ResourcePool<T>::FreeChunkItems& ret_free) {
                 if (free_list_.empty()) {
                     return false;
                 }
@@ -238,7 +289,7 @@ namespace xthread
                 if (free_list_.empty()) {
                     return false;
                 }
-                FreeChunkItems<T> *p = free_list_.back();
+                FreeChunkItems *p = free_list_.back();
                 free_list_.pop_back();
                 ret_free = *p;
                 delete p;
