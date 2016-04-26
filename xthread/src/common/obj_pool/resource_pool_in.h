@@ -21,7 +21,7 @@ namespace xthread
                 static const size_t RESOURCE_POOL_BLOCK_MAX_SIZE       = 128 * 1024;
                 static const size_t RESOURCE_POOL_BLOCK_MAX_ITEM_NUM   = 512;
 
-                static const size_t temp1 = RESOURCE_POOL_BLOCK_MAX_SIZE / sizeof(T) < 1;
+                static const size_t temp1 = RESOURCE_POOL_BLOCK_MAX_SIZE / sizeof(T);
                 static const size_t temp2 = temp1 > 1 ? temp1 : 1;
                 static const size_t RESOURCE_POOL_BLOCK_ITEM_NUM = temp2 > RESOURCE_POOL_BLOCK_MAX_ITEM_NUM ? RESOURCE_POOL_BLOCK_MAX_ITEM_NUM : temp2;
 
@@ -30,6 +30,7 @@ namespace xthread
                 static const size_t RESOURCE_POOL_FREE_LIST_INIT_NUM = 128;
 
                 static const size_t RESOURCE_POOL_GROUP_NUM = 65536;
+
             };
 
         template <typename T>
@@ -65,6 +66,12 @@ namespace xthread
                     bool addGroup(size_t curr_ngroup);
                     bool push_free_chunk(const FreeChunkItems& curr_free);
                     bool pop_free_chunk(FreeChunkItems& ret_free);
+                    static std::string config2String(){
+                        const size_t max_size = 256;
+                        char str[max_size] = {0};
+                        ::snprintf(str, max_size, "FREE_CHUNK_ITEM_NUM[%zd]; BLOCK_ITEM_NUM[%zd]; GROUP_BLOCK_NUM[%zd], FREE_LIST_CHUNK_INIT_NUM[%zd]", FREE_CHUNK_ITEM_NUM, BLOCK_ITEM_NUM, GROUP_BLOCK_NUM, FREE_LIST_INIT_NUM);
+                        return str;
+                    }
 
                     class LocalPool
                     {
@@ -295,6 +302,7 @@ namespace xthread
                 delete p;
                 return true;
             }
+
     }
 }
 #endif
