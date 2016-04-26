@@ -16,6 +16,7 @@ namespace xthread
         template <typename T>
             class ResourcePoolConfig
             {
+                public:
                 static const size_t RESOURCE_POOL_FREE_CHUNK_ITEM_NUM  = 512;
                 static const size_t RESOURCE_POOL_BLOCK_MAX_SIZE       = 128 * 1024;
                 static const size_t RESOURCE_POOL_BLOCK_MAX_ITEM_NUM   = 512;
@@ -95,17 +96,17 @@ namespace xthread
                             }
 
                             T* get_object() {
-                                GET_OBJECT_NEW();
+                                GET_OBJECT();
                             }
 
                             template <typename A1>
                             T* get_object(const A1& a1) {
-                                GET_OBJECT_NEW((a1));
+                                GET_OBJECT((a1));
                             }
 
                             template <typename A1, typename A2>
                             T* get_object(const A1& a1, const A2& a2) {
-                                GET_OBJECT_NEW(a1,a2);
+                                GET_OBJECT((a1,a2));
                             }
 
                             inline std::string getLocalPoolInfo()const {
@@ -130,7 +131,8 @@ namespace xthread
                     T* get_object() {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp)) {
-                            return lp->get_object();
+                            T* ret = lp->get_object();
+                            return ret;
                         }
                         return NULL;
                     }
@@ -142,7 +144,7 @@ namespace xthread
                         }
                         return false;
                     }
-                    
+
                     std::string get_local_pool_info() {
                         LocalPool* lp = get_or_new_local_pool();
                         return lp->getLocalPoolInfo();
@@ -223,9 +225,6 @@ namespace xthread
                             }
                         }
                     }
-                    else {
-                        break;
-                    }
                 } while (addGroup(ngroup));
                 delete newBlock;
                 return NULL;
@@ -256,11 +255,12 @@ namespace xthread
 
         template <typename T>
             typename ResourcePool<T>::LocalPool* ResourcePool<T>::get_or_new_local_pool() {
+                ResourcePool<T>* pool = ResourcePool<T>::getInstance();
                 ResourcePool<T>::LocalPool* lp = local_pool_;
                 if (likely(lp)) {
                     return lp;
                 }
-                lp = new (std::nothrow) ResourcePool<T>::LocalPool;
+                lp = new (std::nothrow) ResourcePool<T>::LocalPool(pool);
                 if (!lp) {
                     return NULL;
                 }
