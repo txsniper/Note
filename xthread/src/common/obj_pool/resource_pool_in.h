@@ -45,18 +45,31 @@ namespace xthread
                     {
                         size_t nitems;
                         T*     items[FREE_CHUNK_ITEM_NUM];
+                        FreeChunkItems()
+                            : nitems(0)
+                        {
+
+                        }
                     };
 
                     struct ResourceBlock
                     {
-                        size_t  nitem;
+                        size_t  nitems;
                         char    items[sizeof(T) * BLOCK_ITEM_NUM];
+                        ResourceBlock()
+                            : nitems(0) {
+                        }
                     };
 
                     struct ResourceBlockGroup
                     {
                         std::atomic<size_t> nblock;
                         std::atomic<ResourceBlock*> blocks[GROUP_BLOCK_NUM];
+                        ResourceBlockGroup()
+                            : nblock(0)
+                        {
+
+                        }
                     };
 
                     typedef std::vector<FreeChunkItems*> FreeChunkList;

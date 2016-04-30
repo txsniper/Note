@@ -9,15 +9,15 @@
         T* ptr = local_free_.items[--local_free_.nitems]; \
         return ptr;                                       \
     }                                                     \
-    if (local_block_ && local_block_->nitem < ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM) { \
-        T* ptr = new (reinterpret_cast<T*>(local_block_->items) + local_block_->nitem) T CTOR_ARGS;   \
-        local_block_->nitem++;                            \
+    if (local_block_ && local_block_->nitems < ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM) { \
+        T* ptr = new (reinterpret_cast<T*>(local_block_->items) + local_block_->nitems) T CTOR_ARGS;   \
+        local_block_->nitems++;                            \
         return ptr;                                       \
     }                                                     \
-     local_block_ = pool_->getBlock(&local_block_index_); \
-    if (local_block_ && local_block_->nitem < ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM) { \
-        T* ptr = new (reinterpret_cast<T*>(local_block_->items) +  local_block_->nitem) T CTOR_ARGS;   \
-        local_block_->nitem++;                            \
+    local_block_ = pool_->getBlock(&local_block_index_); \
+    if (local_block_ && local_block_->nitems < ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM) { \
+        T* ptr = new (reinterpret_cast<T*>(local_block_->items) +  local_block_->nitems) T CTOR_ARGS;   \
+        local_block_->nitems++;                            \
         return ptr;                                       \
     }                                                     \
     return NULL;
