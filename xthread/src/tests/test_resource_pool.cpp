@@ -13,13 +13,18 @@ class TestObject {
     public:
         TestObject() {
             printf("create Object %p\n", this);
+            mark = 0xdeadbeef;
         }
         ~TestObject() {
             printf("destroy Object %p\n", this);
+            if (mark != 0xdeadbeef) {
+                abort();
+            }
         }
 
     private:
         char data[100];
+        size_t  mark;
 };
 
 namespace xthread
@@ -102,4 +107,25 @@ TEST_F(ObjectPoolTest, create_array_data) {
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
     std::string pool_str = xthread::base::get_pool_info<TestObject>();
     std::cout<< info_str<<std::endl<<pool_str<<std::endl;
+    xthread::base::clear_objects<TestObject>();
+}
+
+struct NoDefCtor {
+    explicit NoDefCtor(int param)
+        : value(param) {
+
+    }
+    explicit NoDefCtor(int param, int param1)
+        : value(param + param1) {
+
+    }
+    int value;
+};
+
+TEST_F(ObjectPoolTest, test_no_def_ctor) {
+    using namespace xthread::base;
+    NoDefCtor* a =  get_object<NoDefCtor>(5);
+    EXPECT_EQ(5, a->value);
+    NoDefCtor* b =  get_object<NoDefCtor>(5,10);
+    EXPECT_EQ(15, b->value);
 }

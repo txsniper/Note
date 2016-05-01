@@ -4,6 +4,7 @@
 #include <atomic>
 #include <vector>
 #include <string>
+#include <stdio.h>
 #include "../macros.h"
 #include "../../base/thread_exit_helper.h"
 #include "../../base/lock.h"
@@ -97,6 +98,13 @@ namespace xthread
                                 if (local_free_.nitems > 0) {
                                     pool_->push_free_chunk(local_free_);
                                 }
+                                pool_->clearLocalPoolFromDctr();
+                            }
+
+                            void clear_objects() {
+                                if (local_free_.nitems > 0) {
+                                    pool_->push_free_chunk(local_free_);
+                                }
                             }
 
                             #include "macro_defines.h"
@@ -158,12 +166,67 @@ namespace xthread
                         return NULL;
                     }
 
+                    template <typename PARAM_A>
+                    T* get_object(const PARAM_A& a) {
+                        LocalPool* lp = get_or_new_local_pool();
+                        if (likely(lp)) {
+                            T* ret = lp->get_object(a);
+                            return ret;
+                        }
+                        return NULL;
+                    }
+
+                    template <typename PARAM_A, typename PARAM_B>
+                    T* get_object(const PARAM_A& a, const PARAM_B& b) {
+                        LocalPool* lp = get_or_new_local_pool();
+                        if (likely(lp)) {
+                            T* ret = lp->get_object(a, b);
+                            return ret;
+                        }
+                        return NULL;
+                    }
+
                     bool return_object(T* ptr) {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp)) {
                             return lp->return_object(ptr);
                         }
                         return false;
+                    }
+
+                    // 释放空间，结束时调用
+                    void clear_objects() {
+                        if (local_pool_) {
+                            local_pool_->clear_objects();
+                            local_pool_ = NULL;
+                        }
+                        FreeChunkItems notUse;
+                        while( pop_free_chunk(notUse));
+
+                        if (nlocal_.fetch_sub(1, std::memory_order_relaxed) == 1) {
+                            size_t ngroup = ngroup_.load(std::memory_order_relaxed);
+                            while (ngroup) {
+                                ResourceBlockGroup* curr_group = groups_[--ngroup].load(std::memory_order_relaxed);
+                                if (curr_group) {
+                                    size_t block_num = curr_group->nblock.load(std::memory_order_release);
+                                    while (block_num) {
+                                        ResourceBlock* block = curr_group->blocks[--block_num].load(std::memory_order_relaxed);
+                                        if (!block) {
+                                            continue;
+                                        }
+                                        size_t item_num = block->nitems;
+                                        while (item_num > 0) {
+                                            T* arr_ptr = reinterpret_cast<T*>(block->items);
+                                            T obj = arr_ptr[--item_num];
+
+                                            obj.~T();
+                                        }
+                                        delete block;
+                                    }
+                                }
+                                delete curr_group;
+                            }
+                        }
                     }
 
                     std::string get_local_pool_info() {
@@ -182,11 +245,15 @@ namespace xthread
                         free_list_.reserve(FREE_LIST_INIT_NUM);
                     };
 
+                    static void clearLocalPoolFromDctr() {
+                        local_pool_ = NULL;
+                        nlocal_.fetch_sub(1, std::memory_order_relaxed);
+                    }
+
+                    // 删除的操作要等到线程结束执行时
                     static void deleteLocalPool(void* arg) {
                         LocalPool* lp = reinterpret_cast<LocalPool*>(arg);
                         delete lp;
-                        local_pool_ = NULL;
-                        nlocal_.fetch_sub(1, std::memory_order_relaxed);
                     }
 
                 private:
@@ -256,6 +323,7 @@ namespace xthread
                                 *index = ((ngroup - 1) * GROUP_BLOCK_NUM) + block_index;
                                 return newBlock;
                             }
+                            group->nblock.fetch_sub(1, std::memory_order_relaxed);
                         }
                     }
                 } while (addGroup(ngroup));
@@ -329,7 +397,6 @@ namespace xthread
                 delete p;
                 return true;
             }
-
     }
 }
 #endif
