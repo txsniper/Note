@@ -108,6 +108,7 @@ namespace xthread
                                 else {
                                     bool ret = pool_->push_free_chunk(local_free_);
                                     if (ret) {
+                                        local_free_.nitems = 0;
                                         local_free_.items[local_free_.nitems++] = ptr;
                                         return true;
                                     }
@@ -169,14 +170,23 @@ namespace xthread
                         LocalPool* lp = get_or_new_local_pool();
                         return lp->getLocalPoolInfo();
                     }
+
+                    std::string get_pool_info() {
+                        const int max_size = 255;
+                        char str[max_size] = {0};
+                        snprintf(str, max_size, "pool_[%p], free_list_[%zd], nlocal_[%zd], local_pool_[%p], ngroup_[%zd]", instance_.load(std::memory_order_relaxed), free_list_.size(), nlocal_.load(std::memory_order_relaxed), local_pool_, ngroup_.load(std::memory_order_relaxed));
+                        return str;
+                    }
                 private:
                     ResourcePool() {
                         free_list_.reserve(FREE_LIST_INIT_NUM);
                     };
 
                     static void deleteLocalPool(void* arg) {
-                        delete reinterpret_cast<LocalPool*>(arg);
+                        LocalPool* lp = reinterpret_cast<LocalPool*>(arg);
+                        delete lp;
                         local_pool_ = NULL;
+                        nlocal_.fetch_sub(1, std::memory_order_relaxed);
                     }
 
                 private:
@@ -185,6 +195,7 @@ namespace xthread
                     FreeChunkList   free_list_;
                     MutexLock       free_list_lock_;
 
+                    static std::atomic<size_t> nlocal_;
                     static thread_local LocalPool* local_pool_;
 
                     static std::atomic<size_t> ngroup_;
@@ -197,6 +208,9 @@ namespace xthread
 
         template <typename T>
             MutexLock ResourcePool<T>::instance_lock_;
+
+        template <typename T>
+            std::atomic<size_t> ResourcePool<T>::nlocal_(0);
 
         template <typename T>
             thread_local typename ResourcePool<T>::LocalPool* ResourcePool<T>::local_pool_ = NULL;
@@ -230,7 +244,6 @@ namespace xthread
                     return NULL;
                 }
 
-                const size_t GROUP_NBLOCK = GROUP_BLOCK_NUM;
                 size_t ngroup = 0;
                 do {
                     ngroup = ngroup_.load(std::memory_order_acquire);
@@ -238,9 +251,9 @@ namespace xthread
                         ResourceBlockGroup* group = groups_[ngroup - 1].load(std::memory_order_acquire);
                         if (group) {
                             size_t block_index = group->nblock.fetch_add(1, std::memory_order_relaxed);
-                            if (block_index < ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM) {
+                            if (block_index < GROUP_BLOCK_NUM) {
                                 group->blocks[block_index].store(newBlock, std::memory_order_release);
-                                *index = ((ngroup - 1) * GROUP_NBLOCK) + block_index;
+                                *index = ((ngroup - 1) * GROUP_BLOCK_NUM) + block_index;
                                 return newBlock;
                             }
                         }
@@ -286,6 +299,7 @@ namespace xthread
                 }
                 local_pool_ = lp;
                 registerThreadExitFunc(ResourcePool<T>::deleteLocalPool, reinterpret_cast<void*>(lp));
+                nlocal_.fetch_add(1, std::memory_order_relaxed);
                 return lp;
             }
 

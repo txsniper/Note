@@ -52,6 +52,7 @@ class ObjectPoolTest : public ::testing::Test {
         }
 };
 
+/*
 TEST_F(ObjectPoolTest, create_data) {
     TestObject* a = xthread::base::get_object<TestObject>();
     TestObject* b = xthread::base::get_object<TestObject>();
@@ -63,19 +64,42 @@ TEST_F(ObjectPoolTest, create_data) {
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
     std::cout<< info_str<<std::endl;
 }
+*/
 
-/*
 TEST_F(ObjectPoolTest, create_array_data) {
-    const size_t len = 1026;
+    const size_t len = 13;
     TestObject* arr[len] = {0};
+    size_t count = 0;
     for(size_t i = 0; i < len; ++i) {
         arr[i] = xthread::base::get_object<TestObject>();
+        count++;
     }
-    for(size_t i = 0; i < len; ++i) {
+    for(size_t i = 0; i < count; ++i) {
         xthread::base::return_object<TestObject>(arr[i]);
     }
+    const size_t len1 = 30;
+    TestObject* brr[len1] = {0};
+    for(size_t i = 0; i < len1; ++i) {
+        brr[i] = xthread::base::get_object<TestObject>();
+        count++;
+    }
+    for(size_t i = 0; i < len1; ++i) {
+        xthread::base::return_object<TestObject>(brr[i]);
+    }
+
+    const size_t len2 = 120;
+    TestObject* crr[len2] = {0};
+    for(size_t i = 0; i < len2; ++i) {
+        crr[i] = xthread::base::get_object<TestObject>();
+        count++;
+    }
+    TestObject* a = xthread::base::get_object<TestObject>();
+    TestObject* b = xthread::base::get_object<TestObject>();
+    (void)a;
+    (void)b;
     (void)arr;
+    (void)crr;
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
-    std::cout<< info_str<<std::endl;
+    std::string pool_str = xthread::base::get_pool_info<TestObject>();
+    std::cout<< info_str<<std::endl<<pool_str<<std::endl;
 }
-*/

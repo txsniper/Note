@@ -21,6 +21,11 @@ std::string get_local_pool_info() {
     return ResourcePool<T>::getInstance()->get_local_pool_info();
 }
 
+template <typename T>
+std::string get_pool_info() {
+    return ResourcePool<T>::getInstance()->get_pool_info();
+}
+
 }
 }
 #endif
