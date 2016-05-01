@@ -3,7 +3,9 @@
 #include <cstdio>
 #include <vector>
 #include <cstdio>
+#include <pthread.h>
 #include "../common/obj_pool/resource_pool.h"
+#include "../base/time.h"
 int main(int argc, char **argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
@@ -57,7 +59,6 @@ class ObjectPoolTest : public ::testing::Test {
         }
 };
 
-/*
 TEST_F(ObjectPoolTest, create_data) {
     TestObject* a = xthread::base::get_object<TestObject>();
     TestObject* b = xthread::base::get_object<TestObject>();
@@ -69,7 +70,6 @@ TEST_F(ObjectPoolTest, create_data) {
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
     std::cout<< info_str<<std::endl;
 }
-*/
 
 TEST_F(ObjectPoolTest, create_array_data) {
     const size_t len = 13;
@@ -128,4 +128,90 @@ TEST_F(ObjectPoolTest, test_no_def_ctor) {
     EXPECT_EQ(5, a->value);
     NoDefCtor* b =  get_object<NoDefCtor>(5,10);
     EXPECT_EQ(15, b->value);
+}
+
+
+class TestObjectDyMark {
+    public:
+        TestObjectDyMark(size_t temp_mark) {
+            printf("create Object %p\n", this);
+            mark = temp_mark;
+        }
+        ~TestObjectDyMark() {
+            printf("destroy Object %p\n", this);
+        }
+    private:
+        char data[100];
+        size_t  mark;
+};
+
+void thread_sleep(uint32_t ms) {
+        pthread_mutex_t mutex;
+        pthread_cond_t cond;
+        pthread_mutex_init(&mutex, NULL);
+        pthread_cond_init(&cond, NULL);
+        pthread_mutex_lock(&mutex);
+        struct timeval now;
+        struct timespec timeout;
+        gettimeofday(&now, NULL);
+        timeout.tv_sec = now.tv_sec + ms / 1000;
+        timeout.tv_nsec = now.tv_usec + (ms % 1000) * 1000000L;
+        pthread_cond_timedwait(&cond, &mutex, &timeout);
+}
+
+void* thread_func(void *arg) {
+    uintptr_t n = reinterpret_cast<uintptr_t>(arg);
+    //size_t n = static_cast<size_t>(arg_ptr);
+    std::vector<TestObjectDyMark*> arr;
+    arr.reserve(n);
+    for(size_t i = 0; i < n; ++i) {
+        arr.push_back(xthread::base::get_object<TestObjectDyMark>(0));
+        uint32_t sleep_ms = rand() % 20;
+        thread_sleep(sleep_ms);
+    }
+
+    for(size_t i = 0; i < n; ++i) {
+        TestObjectDyMark* ptr = arr.back();
+        xthread::base::return_object<TestObjectDyMark>(ptr);
+        uint32_t sleep_ms = rand() % 15;
+        thread_sleep(sleep_ms);
+        arr.pop_back();
+    }
+    printf("THREAD %zd exit\n", n);
+    return NULL;
+}
+TEST_F(ObjectPoolTest, test_multi_thread) {
+    const size_t thread_count = 2;
+    pthread_t tid[thread_count];
+    for(size_t i = 0; i < thread_count; ++i) {
+        uintptr_t param = (i + 3) * 5 + 7;
+        EXPECT_EQ(0, pthread_create(&tid[i], NULL, thread_func, reinterpret_cast<void*>(param)));
+    }
+    uint32_t sleep_ms = rand() % 31;
+    thread_sleep(sleep_ms);
+
+    size_t n = 100;
+    std::vector<TestObjectDyMark*> arr;
+    arr.reserve(n);
+    for(size_t i = 0; i < n; ++i) {
+        arr.push_back(xthread::base::get_object<TestObjectDyMark>(0));
+        sleep_ms = rand() % 20;
+        thread_sleep(sleep_ms);
+    }
+
+    for(size_t i = 0; i < n; ++i) {
+        TestObjectDyMark* ptr = arr.back();
+        xthread::base::return_object<TestObjectDyMark>(ptr);
+        sleep_ms = rand() % 15;
+        thread_sleep(sleep_ms);
+        arr.pop_back();
+    }
+
+    for(size_t i = 0; i < thread_count; ++i) {
+        pthread_join(tid[i], NULL);
+    }
+    std::string info_str = xthread::base::get_local_pool_info<TestObjectDyMark>();
+    std::string pool_str = xthread::base::get_pool_info<TestObjectDyMark>();
+    std::cout<< info_str<<std::endl<<pool_str<<std::endl;
+    xthread::base::clear_objects<TestObjectDyMark>();
 }

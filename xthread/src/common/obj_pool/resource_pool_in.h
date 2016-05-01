@@ -217,9 +217,9 @@ namespace xthread
                                         size_t item_num = block->nitems;
                                         while (item_num > 0) {
                                             T* arr_ptr = reinterpret_cast<T*>(block->items);
-                                            T obj = arr_ptr[--item_num];
+                                            // NOTE : 这里不能使用 T obj = arr_ptr[--item_num], 这将导致将数组中的对象赋值给obj临时变量
+                                            arr_ptr[--item_num].~T();
 
-                                            obj.~T();
                                         }
                                         delete block;
                                     }
