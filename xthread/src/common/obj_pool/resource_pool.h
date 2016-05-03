@@ -7,23 +7,23 @@ namespace xthread
 namespace base
 {
 template <typename T>
-T* get_object() {
-    return ResourcePool<T>::getInstance()->get_object();
+T* get_resource(ResourceId<T>* id) {
+    return ResourcePool<T>::getInstance()->get_resource(id);
 }
 
 template <typename T>
-bool return_object(T* ptr) {
-    return ResourcePool<T>::getInstance()->return_object(ptr);
+bool return_resource(ResourceId<T> id) {
+    return ResourcePool<T>::getInstance()->return_resource(id);
 }
 
 template <typename T, typename PARAM_A>
-T* get_object(const PARAM_A& a) {
-    return ResourcePool<T>::getInstance()->get_object(a);
+T* get_resource(ResourceId<T>* id, const PARAM_A& a) {
+    return ResourcePool<T>::getInstance()->get_resource(id, a);
 }
 
 template <typename T, typename PARAM_A, typename PARAM_B>
-T* get_object(const PARAM_A& a, const PARAM_B& b) {
-    return ResourcePool<T>::getInstance()->get_object(a, b);
+T* get_resource(ResourceId<T>* id, const PARAM_A& a, const PARAM_B& b) {
+    return ResourcePool<T>::getInstance()->get_resource(id, a, b);
 }
 
 template <typename T>

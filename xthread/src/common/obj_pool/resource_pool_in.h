@@ -13,6 +13,13 @@ namespace xthread
 {
     namespace base
     {
+        template <typename T>
+            struct ResourceId {
+                uint64_t value;
+                operator uint64_t() const {
+                    return value;
+                }
+            };
 
         template <typename T>
             class ResourcePoolConfig
@@ -28,7 +35,7 @@ namespace xthread
 
                 static const size_t RESOURCE_POOL_GROUP_BLOCK_NUM = 512;
 
-                static const size_t RESOURCE_POOL_FREE_LIST_INIT_NUM = 128;
+                static const size_t RESOURCE_POOL_FREE_LIST_INIT_SIZE = 128;
 
                 static const size_t RESOURCE_POOL_GROUP_NUM = 65536;
 
@@ -37,19 +44,20 @@ namespace xthread
         template <typename T>
             class ResourcePool {
                 public:
-                    static const size_t FREE_CHUNK_ITEM_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_CHUNK_ITEM_NUM;
                     static const size_t MAX_GROUP_NUM       = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_NUM;
-                    static const size_t BLOCK_ITEM_NUM      = ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM;
-                    static const size_t FREE_LIST_INIT_NUM  = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_LIST_INIT_NUM;
                     static const size_t GROUP_BLOCK_NUM     = ResourcePoolConfig<T>::RESOURCE_POOL_GROUP_BLOCK_NUM;
+                    static const size_t BLOCK_ITEM_NUM      = ResourcePoolConfig<T>::RESOURCE_POOL_BLOCK_ITEM_NUM;
+                    static const size_t FREE_LIST_INIT_SIZE  = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_LIST_INIT_SIZE;
+                    static const size_t FREE_CHUNK_ITEM_NUM = ResourcePoolConfig<T>::RESOURCE_POOL_FREE_CHUNK_ITEM_NUM;
+
                     struct FreeChunkItems
                     {
                         size_t nitems;
-                        T*     items[FREE_CHUNK_ITEM_NUM];
+                        ResourceId<T>     items[FREE_CHUNK_ITEM_NUM];
                         FreeChunkItems()
                             : nitems(0)
                         {
-
+                            memset(items, 0, sizeof(ResourceId<T>) * FREE_CHUNK_ITEM_NUM);
                         }
                     };
 
@@ -59,6 +67,7 @@ namespace xthread
                         char    items[sizeof(T) * BLOCK_ITEM_NUM];
                         ResourceBlock()
                             : nitems(0) {
+                            memset(items, 0, sizeof(T) * BLOCK_ITEM_NUM);
                         }
                     };
 
@@ -69,7 +78,7 @@ namespace xthread
                         ResourceBlockGroup()
                             : nblock(0)
                         {
-
+                            memset(blocks, 0, sizeof(ResourceBlock*) * GROUP_BLOCK_NUM);
                         }
                     };
 
@@ -83,7 +92,7 @@ namespace xthread
                     static std::string config2String(){
                         const size_t max_size = 256;
                         char str[max_size] = {0};
-                        ::snprintf(str, max_size, "FREE_CHUNK_ITEM_NUM[%zd]; BLOCK_ITEM_NUM[%zd]; GROUP_BLOCK_NUM[%zd], FREE_LIST_CHUNK_INIT_NUM[%zd]", FREE_CHUNK_ITEM_NUM, BLOCK_ITEM_NUM, GROUP_BLOCK_NUM, FREE_LIST_INIT_NUM);
+                        ::snprintf(str, max_size, "MAX_GROUP_NUM[%zd]; GROUP_BLOCK_NUM[%zd]; BLOCK_ITEM_NUM[%zd]; FREE_CHUNK_ITEM_NUM[%zd]", MAX_GROUP_NUM, GROUP_BLOCK_NUM, BLOCK_ITEM_NUM, FREE_CHUNK_ITEM_NUM);
                         return str;
                     }
 
@@ -108,34 +117,35 @@ namespace xthread
                             }
 
                             #include "macro_defines.h"
-                            bool return_object(T* ptr) {
+                            bool return_resource(ResourceId<T> id) {
+                                // printf("return resource id[%ld]\n", id.value);
                                 if (local_free_.nitems < FREE_CHUNK_ITEM_NUM) {
-                                    local_free_.items[local_free_.nitems++] = ptr;
+                                    local_free_.items[local_free_.nitems++] = id;
                                     return true;
                                 }
                                 else {
                                     bool ret = pool_->push_free_chunk(local_free_);
                                     if (ret) {
                                         local_free_.nitems = 0;
-                                        local_free_.items[local_free_.nitems++] = ptr;
+                                        local_free_.items[local_free_.nitems++] = id;
                                         return true;
                                     }
                                 }
                                 return false;
                             }
 
-                            T* get_object() {
-                                GET_OBJECT();
+                            T* get_resource(ResourceId<T>* id) {
+                                GET_RESOURCE();
                             }
 
                             template <typename A1>
-                            T* get_object(const A1& a1) {
-                                GET_OBJECT((a1));
+                            T* get_resource(ResourceId<T>* id, const A1& a1) {
+                                GET_RESOURCE((a1));
                             }
 
                             template <typename A1, typename A2>
-                            T* get_object(const A1& a1, const A2& a2) {
-                                GET_OBJECT((a1,a2));
+                            T* get_resource(ResourceId<T>* id, const A1& a1, const A2& a2) {
+                                GET_RESOURCE((a1,a2));
                             }
 
                             inline std::string getLocalPoolInfo()const {
@@ -153,43 +163,76 @@ namespace xthread
                     };
                     friend class LocalPool;
                 public:
+
+                    static inline T* get_addr_by_id_unsafe(ResourceId<T> id) {
+                        // step1 : 获取block的下标
+                        size_t block_index = id.value / BLOCK_ITEM_NUM;
+
+                        // step2 : 获取group的下标
+                        size_t group_index  = block_index / GROUP_BLOCK_NUM;
+                        ResourceBlockGroup* group = groups_[group_index].load(std::memory_order_consume);
+                        ResourceBlock* block = group->blocks[block_index & (GROUP_BLOCK_NUM - 1)].load(std::memory_order_consume);
+                        T* addr = static_cast<T*>(block->items) + id.value - block_index * BLOCK_ITEM_NUM;
+                        return addr;
+                    }
+
+                    static inline T* get_addr_by_id_safe(ResourceId<T> id) {
+                        size_t block_index  = id.value / BLOCK_ITEM_NUM;
+                        size_t group_index = block_index / GROUP_BLOCK_NUM;
+                        // printf("id[%ld], block_index [%zd], group_inde[%zd]\n", id.value, block_index, group_index);
+                        if (likely(group_index < MAX_GROUP_NUM)) {
+                            ResourceBlockGroup* group = groups_[group_index].load(std::memory_order_consume);
+                            if (likely(group != NULL)) {
+                                ResourceBlock* block = group->blocks[block_index & (GROUP_BLOCK_NUM - 1)].load(std::memory_order_consume);
+                                if (likely(block != NULL)) {
+                                    size_t itemOffset = id.value - block_index * BLOCK_ITEM_NUM;
+                                    if (likely(itemOffset < block->nitems)) {
+                                        T* addr = reinterpret_cast<T*>(block->items) + itemOffset;
+                                        return addr;
+                                    }
+                                }
+                            }
+                        }
+                        return NULL;
+                    }
+
                     static ResourcePool* getInstance();
 
                     LocalPool* get_or_new_local_pool();
 
-                    T* get_object() {
+                    T* get_resource(ResourceId<T>* id) {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp)) {
-                            T* ret = lp->get_object();
+                            T* ret = lp->get_resource(id);
                             return ret;
                         }
                         return NULL;
                     }
 
                     template <typename PARAM_A>
-                    T* get_object(const PARAM_A& a) {
+                    T* get_resource(ResourceId<T>* id, const PARAM_A& a) {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp)) {
-                            T* ret = lp->get_object(a);
+                            T* ret = lp->get_resource(id, a);
                             return ret;
                         }
                         return NULL;
                     }
 
                     template <typename PARAM_A, typename PARAM_B>
-                    T* get_object(const PARAM_A& a, const PARAM_B& b) {
+                    T* get_resource(ResourceId<T>* id, const PARAM_A& a, const PARAM_B& b) {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp)) {
-                            T* ret = lp->get_object(a, b);
+                            T* ret = lp->get_resource(id, a, b);
                             return ret;
                         }
                         return NULL;
                     }
 
-                    bool return_object(T* ptr) {
+                    bool return_resource(ResourceId<T> id) {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp)) {
-                            return lp->return_object(ptr);
+                            return lp->return_resource(id);
                         }
                         return false;
                     }
@@ -242,7 +285,7 @@ namespace xthread
                     }
                 private:
                     ResourcePool() {
-                        free_list_.reserve(FREE_LIST_INIT_NUM);
+                        free_list_.reserve(FREE_LIST_INIT_SIZE);
                     };
 
                     static void clearLocalPoolFromDctr() {
@@ -306,6 +349,7 @@ namespace xthread
 
         template <typename T>
             typename ResourcePool<T>::ResourceBlock* ResourcePool<T>::getBlock(size_t* index) {
+                // printf(" GET NEW BLOCK\n");
                 ResourceBlock* newBlock = new (std::nothrow) ResourceBlock;
                 if (!newBlock) {
                     return NULL;
@@ -313,14 +357,20 @@ namespace xthread
 
                 size_t ngroup = 0;
                 do {
+                    // step1 : 获取group的数量
                     ngroup = ngroup_.load(std::memory_order_acquire);
-                    if ((ngroup >= 1) && (ngroup < MAX_GROUP_NUM)) {
+                    //printf("ngroup[%zd]\n", ngroup);
+                    if ((ngroup >= 1) && (ngroup <= MAX_GROUP_NUM)) {
                         ResourceBlockGroup* group = groups_[ngroup - 1].load(std::memory_order_acquire);
                         if (group) {
+                            // step2 : 获取block的下标，然后将block数量加一
                             size_t block_index = group->nblock.fetch_add(1, std::memory_order_relaxed);
+                            // printf("curr_block [%zd]\n", block_index);
                             if (block_index < GROUP_BLOCK_NUM) {
                                 group->blocks[block_index].store(newBlock, std::memory_order_release);
+                                // 返回newBlock的下标
                                 *index = ((ngroup - 1) * GROUP_BLOCK_NUM) + block_index;
+                                // printf("block_index [%zd]\n", *index);
                                 return newBlock;
                             }
                             group->nblock.fetch_sub(1, std::memory_order_relaxed);
@@ -349,8 +399,10 @@ namespace xthread
                     }
                     groups_[ngroup].store(newGroup, std::memory_order_release);
                     ngroup_.store(ngroup + 1, std::memory_order_acquire);
+                    // printf("new group [%zd] ----------------\n", ngroup + 1);
                     return true;
                 }
+                // printf("no new group [%zd] [%zd]\n", ngroup, MAX_GROUP_NUM);
                 return false;
             }
 

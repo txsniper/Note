@@ -58,20 +58,16 @@ namespace xthread
 #endif
         };
 
-        static const size_t OP_MAX_BLOCK_NGROUP = 65535;
-        static const size_t OP_GROUP_NBLOCK_NBIT = 16;
-
-        // 每一个BlockGroup中含有的Block数量
-        static const size_t OP_GROUP_NBLOCK = (1UL << OP_GROUP_NBLOCK_NBIT);
-        static const size_t OP_INITIAL_FREE_LIST_SIZE = 1024;
-
         template <typename T>
             class ObjectPool {
                 public:
-                    static const size_t BLOCK_NITEM         = ObjectPoolConfig<T>::BLOCK_ITEM_NUM;
-                    static const size_t FREE_CHUNK_NITEM    = ObjectPoolConfig<T>::FREE_CHUNK_ITEM_NUM;
+                    static const size_t MAX_GROUP_NUM        = ObjectPoolConfig<T>::OBJECT_POOL_GROUP_NUM;
+                    static const size_t GROUP_BLOCK_NUM      = ObjectPoolConfig<T>::OBJECT_POOL_GROUP_BLOCK_NUM;
+                    static const size_t BLOCK_ITEM_NUM       = ObjectPoolConfig<T>::OBJECT_POOL_BLOCK_ITEM_NUM;
+                    static const size_t FREE_LIST_INIT_SIZE  = ObjectPoolConfig<T>::OBJECT_POOL_FREE_LIST_INIT_SIZE;
+                    static const size_t FREE_CHUNK_ITEM_NUM  = ObjectPoolConfig<T>::OBJECT_POOL_FREE_CHUNK_ITEM_NUM;
                     // 空闲的对象在进入全局空闲列表之前先放在这里
-                    typedef ObjectPoolFreeChunk<T, FREE_CHUNK_NITEM> FreeChunk;
+                    typedef ObjectPoolFreeChunk<T, FREE_CHUNK_ITEM_NUM> FreeChunk;
                 private:
                     ObjectPool() {
 
@@ -85,16 +81,16 @@ namespace xthread
                     // 每一个Block包含一个对象Item列表
                     struct Block {
                         size_t nitem;
-                        char items[sizeof(T) * BLOCK_NITEM];
+                        char items[sizeof(T) * BLOCK_ITEM_NUM];
                         Block() : nitem(0) {}
                     };
 
                     // 每一个BlockGroup包含一个Block指针数组
                     struct BlockGroup {
                         std::atomic<size_t> nblock;
-                        std::atomic<Block*> blocks[OP_GROUP_NBLOCK];
+                        std::atomic<Block*> blocks[GROUP_BLOCK_NUM];
                         BlockGroup() : nblock(0) {
-                            memset(blocks, 0, sizeof(std::atomic<Block*>) * OP_GROUP_NBLOCK);
+                            memset(blocks, 0, sizeof(std::atomic<Block*>) * GROUP_BLOCK_NUM);
                         }
                     };
 
@@ -133,7 +129,7 @@ namespace xthread
                                 return cur_free_.ptrs[--cur_free_.nfree];   \
                             }                                               \
                             /* step3 : 从本地block分配      */              \
-                            if (cur_block_ && cur_block_->nitem < BLOCK_NITEM) {                        \
+                            if (cur_block_ && cur_block_->nitem < BLOCK_ITEM_NUM) {                        \
                                 T* obj = new (reinterpret_cast<T*>(cur_block_->items) + cur_block_->nitem) T CTOR_ARGS;   \
                                 if (!ObjectPoolValidator<T>::validate(obj)) {                           \
                                     obj->~T();                                                          \
@@ -144,7 +140,7 @@ namespace xthread
                             }                                                                           \
                             /* step4: 获取新的Block */                                                  \
                             cur_block_ = ObjectPool::add_block(&cur_block_index_);                      \
-                            if (cur_block_ && cur_block_->nitem < BLOCK_NITEM) {                        \
+                            if (cur_block_ && cur_block_->nitem < BLOCK_ITEM_NUM) {                        \
                                 T* obj = new (reinterpret_cast<T*>(cur_block_->items) + cur_block_->nitem) T CTOR_ARGS;   \
                                 if (!ObjectPoolValidator<T>::validate(obj)) {                           \
                                     obj->~T();                                                          \
@@ -170,7 +166,7 @@ namespace xthread
                                 }
 
                             inline int return_object(T* obj) {
-                                if (cur_free_.nfree < ObjectPool::FREE_CHUNK_NITEM) {
+                                if (cur_free_.nfree < ObjectPool::FREE_CHUNK_ITEM_NUM) {
                                     cur_free_.ptrs[cur_free_.nfree++] = obj;
                                     XTHREAD_OBJECT_POOL_FREE_ITEM_NUM_ADD1;
                                     return 0;
@@ -184,12 +180,14 @@ namespace xthread
                                 return -1;
                             }
 
-                            inline std::string getLocalPoolInfo()const {
+                            inline std::string get_local_pool_info()const {
                                 const size_t max_size = 256;
                                 char str[max_size] = {0};
                                 ::snprintf(str, max_size, "pool[%p], local_pool[%p], cur_block[%p], cur_block_index[%zd], FreeChunk.nfree[%zd]", pool_, this, cur_block_, cur_block_index_, cur_free_.nfree);
                                 return str;
                            }
+
+
                         private:
                             // 全局pool
                             ObjectPool* pool_;
@@ -209,6 +207,12 @@ namespace xthread
                     static bool     add_block_group(size_t old_ngroup);
                     ObjectPoolInfo get_object_pool_info() const;
 
+                    static std::string config2String(){
+                        const size_t max_size = 256;
+                        char str[max_size] = {0};
+                        ::snprintf(str, max_size, "MAX_GROUP_NUM[%zd]; GROUP_BLOCK_NUM[%zd]; BLOCK_ITEM_NUM[%zd]; FREE_CHUNK_ITEM_NUM[%zd]", MAX_GROUP_NUM, GROUP_BLOCK_NUM, BLOCK_ITEM_NUM, FREE_CHUNK_ITEM_NUM);
+                        return str;
+                    }
                     inline T* get_object() {
                         LocalPool* lp = get_or_new_local_pool();
                         if (likely(lp != NULL)) {
@@ -248,14 +252,21 @@ namespace xthread
                         LocalPool* lp = local_pool_;
                         if (likely(lp)) {
                             local_pool_ = NULL;
-                            registerThreadExitFunc(LocalPool::deleteLocalPool, static_cast<void*>(lp));
+                            unregisterThreadExitFunc(LocalPool::deleteLocalPool, static_cast<void*>(lp));
                             delete lp;
                         }
                     }
 
                     std::string get_local_pool_info() {
                         LocalPool* lp = get_or_new_local_pool();
-                        return lp->getLocalPoolInfo();
+                        return lp->get_local_pool_info();
+                    }
+
+                    std::string get_pool_info() {
+                        const int max_size = 255;
+                        char str[max_size] = {0};
+                        snprintf(str, max_size, "pool_[%p], free_list_[%zd], nlocal_[%zd], local_pool_[%p], ngroup_[%zd]", singleton_.load(std::memory_order_relaxed), free_chunks_.size(), nlocal_.load(std::memory_order_relaxed), local_pool_, ngroup_.load(std::memory_order_relaxed));
+                        return str;
                     }
 
                     void clear_local_pool() {
@@ -279,7 +290,7 @@ namespace xthread
                             if (bg == NULL) {
                                 break;
                             }
-                            size_t nblock = std::min(bg->nblock.load(std::memory_order_relaxed), OP_GROUP_NBLOCK);
+                            size_t nblock = std::min(bg->nblock.load(std::memory_order_relaxed), GROUP_BLOCK_NUM);
                             for (size_t j = 0; j < nblock; ++j) {
                                 Block* b = bg->blocks_[j].load(std::memory_order_relaxed);
                                 if ( NULL == b) {
@@ -293,7 +304,7 @@ namespace xthread
                             }
                             delete bg;
                         }
-                        memset(block_groups_, 0, sizeof(std::aotimic<BlockGroup*>) * OP_MAX_BLOCK_NGROUP);
+                        memset(block_groups_, 0, sizeof(std::aotimic<BlockGroup*>) * MAX_GROUP_NUM);
 #endif
                     }
 
@@ -309,7 +320,7 @@ namespace xthread
                     static std::atomic<size_t> ngroup_;
 
                     // block_groups_ : atomic指针数组
-                    static std::atomic<BlockGroup*> block_groups_[OP_MAX_BLOCK_NGROUP];
+                    static std::atomic<BlockGroup*> block_groups_[MAX_GROUP_NUM];
                     static MutexLock    block_group_mutex_;
 
                     MutexLock               free_chunks_lock_;
@@ -337,7 +348,7 @@ namespace xthread
 
         template <typename T>
             std::atomic<typename ObjectPool<T>::BlockGroup*>
-            ObjectPool<T>::block_groups_[OP_MAX_BLOCK_NGROUP] = {};
+            ObjectPool<T>::block_groups_[MAX_GROUP_NUM] = {};
 
         template <typename T>
             MutexLock ObjectPool<T>::block_group_mutex_;
@@ -415,10 +426,10 @@ namespace xthread
                     if (ngroup >= 1) {
                         BlockGroup* g = block_groups_[ngroup - 1].load(std::memory_order_consume);
                         size_t block_index = g->nblock.fetch_add(1, std::memory_order_relaxed);
-                        if (block_index < OP_GROUP_NBLOCK) {
+                        if (block_index < GROUP_BLOCK_NUM) {
                             g->blocks[block_index].store(new_block, std::memory_order_release);
                             // index是计算所有Group在内的Index
-                            *index = (ngroup - 1) * OP_GROUP_NBLOCK + block_index;
+                            *index = (ngroup - 1) * GROUP_BLOCK_NUM + block_index;
                             return new_block;
                         }
                         g->nblock.fetch_sub(1, std::memory_order_relaxed);
@@ -437,7 +448,7 @@ namespace xthread
                 if (ngroup != old_ngroup) {
                     return true;
                 }
-                if (ngroup < OP_MAX_BLOCK_NGROUP) {
+                if (ngroup < MAX_GROUP_NUM) {
                     bg = new (std::nothrow) BlockGroup;
                     if (NULL != bg) {
                         block_groups_[ngroup].store(bg, std::memory_order_release);

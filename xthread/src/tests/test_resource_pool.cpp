@@ -14,11 +14,11 @@ int main(int argc, char **argv) {
 class TestObject {
     public:
         TestObject() {
-            printf("create Object %p\n", this);
+            //printf("create Object %p\n", this);
             mark = 0xdeadbeef;
         }
         ~TestObject() {
-            printf("destroy Object %p\n", this);
+            // printf("destroy Object %p\n", this);
             if (mark != 0xdeadbeef) {
                 abort();
             }
@@ -33,6 +33,7 @@ namespace xthread
 {
 namespace base
 {
+    /*
 template <> class ResourcePoolConfig<TestObject> {
     public:
         static const size_t RESOURCE_POOL_FREE_CHUNK_ITEM_NUM = 2;
@@ -41,6 +42,7 @@ template <> class ResourcePoolConfig<TestObject> {
         static const size_t RESOURCE_POOL_FREE_LIST_INIT_NUM = 2;
         static const size_t RESOURCE_POOL_GROUP_BLOCK_NUM = 2;
 };
+*/
 }
 }
 class ObjectPoolTest : public ::testing::Test {
@@ -60,13 +62,15 @@ class ObjectPoolTest : public ::testing::Test {
 };
 
 TEST_F(ObjectPoolTest, create_data) {
-    TestObject* a = xthread::base::get_object<TestObject>();
-    TestObject* b = xthread::base::get_object<TestObject>();
+    xthread::base::ResourceId<TestObject> id_a;
+xthread::base::ResourceId<TestObject> id_b;
+    TestObject* a = xthread::base::get_resource<TestObject>(&id_a);
+    TestObject* b = xthread::base::get_resource<TestObject>(&id_b);
     std::string poolConfigStr = xthread::base::ResourcePool<TestObject>::config2String();
     std::cout<<poolConfigStr<<std::endl;
     std::cout<<"a "<<a<<"  b: "<<b<<std::endl;
-    xthread::base::return_object<TestObject>(a);
-    xthread::base::return_object<TestObject>(b);
+    xthread::base::return_resource<TestObject>(id_a);
+    xthread::base::return_resource<TestObject>(id_b);
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
     std::cout<< info_str<<std::endl;
 }
@@ -74,35 +78,48 @@ TEST_F(ObjectPoolTest, create_data) {
 TEST_F(ObjectPoolTest, create_array_data) {
     const size_t len = 13;
     TestObject* arr[len] = {0};
+    using namespace xthread::base;
+    std::string poolConfigStr = xthread::base::ResourcePool<TestObject>::config2String();
+    std::cout<<poolConfigStr<<std::endl;
+    ResourceId<TestObject> arr_id[len];
     size_t count = 0;
     for(size_t i = 0; i < len; ++i) {
-        arr[i] = xthread::base::get_object<TestObject>();
+        ResourceId<TestObject> id;
+        arr[i] = get_resource<TestObject>(&id);
+        printf("INDEX[%zd] id[%ld] addr[%p]\n", i, id.value, arr[i]);
+        arr_id[i] = id;
         count++;
     }
     for(size_t i = 0; i < count; ++i) {
-        xthread::base::return_object<TestObject>(arr[i]);
+        xthread::base::return_resource<TestObject>(arr_id[i]);
     }
     const size_t len1 = 30;
+    ResourceId<TestObject> idb[len1];
     TestObject* brr[len1] = {0};
     for(size_t i = 0; i < len1; ++i) {
-        brr[i] = xthread::base::get_object<TestObject>();
+        brr[i] = xthread::base::get_resource<TestObject>(idb + i);
         count++;
     }
     for(size_t i = 0; i < len1; ++i) {
-        xthread::base::return_object<TestObject>(brr[i]);
+        xthread::base::return_resource<TestObject>(idb[i]);
+        brr[i] = NULL;
     }
 
     const size_t len2 = 120;
     TestObject* crr[len2] = {0};
+    ResourceId<TestObject> idc[len2];
     for(size_t i = 0; i < len2; ++i) {
-        crr[i] = xthread::base::get_object<TestObject>();
+        crr[i] = xthread::base::get_resource<TestObject>(idc + i);
         count++;
     }
-    TestObject* a = xthread::base::get_object<TestObject>();
-    TestObject* b = xthread::base::get_object<TestObject>();
+    ResourceId<TestObject> id_a;
+    ResourceId<TestObject> id_b;
+    TestObject* a = xthread::base::get_resource<TestObject>(&id_a);
+    TestObject* b = xthread::base::get_resource<TestObject>(&id_b);
     (void)a;
     (void)b;
     (void)arr;
+    (void)brr;
     (void)crr;
     std::string info_str = xthread::base::get_local_pool_info<TestObject>();
     std::string pool_str = xthread::base::get_pool_info<TestObject>();
@@ -124,9 +141,11 @@ struct NoDefCtor {
 
 TEST_F(ObjectPoolTest, test_no_def_ctor) {
     using namespace xthread::base;
-    NoDefCtor* a =  get_object<NoDefCtor>(5);
+    ResourceId<NoDefCtor> id_a;
+    ResourceId<NoDefCtor> id_b;
+    NoDefCtor* a =  get_resource<NoDefCtor>(&id_a, 5);
     EXPECT_EQ(5, a->value);
-    NoDefCtor* b =  get_object<NoDefCtor>(5,10);
+    NoDefCtor* b =  get_resource<NoDefCtor>(&id_b, 5,10);
     EXPECT_EQ(15, b->value);
 }
 
@@ -160,27 +179,33 @@ void thread_sleep(uint32_t ms) {
 }
 
 void* thread_func(void *arg) {
+    using namespace xthread::base;
     uintptr_t n = reinterpret_cast<uintptr_t>(arg);
     //size_t n = static_cast<size_t>(arg_ptr);
     std::vector<TestObjectDyMark*> arr;
+    std::vector<ResourceId<TestObjectDyMark> > arr_id;
     arr.reserve(n);
     for(size_t i = 0; i < n; ++i) {
-        arr.push_back(xthread::base::get_object<TestObjectDyMark>(0));
+        ResourceId<TestObjectDyMark> id;
+        TestObjectDyMark *ptr = get_resource<TestObjectDyMark>(&id, 0);
+        arr.push_back(ptr);
+        arr_id.push_back(id);
         uint32_t sleep_ms = rand() % 20;
         thread_sleep(sleep_ms);
     }
 
     for(size_t i = 0; i < n; ++i) {
-        TestObjectDyMark* ptr = arr.back();
-        xthread::base::return_object<TestObjectDyMark>(ptr);
+        return_resource<TestObjectDyMark>(arr_id.back());
         uint32_t sleep_ms = rand() % 15;
         thread_sleep(sleep_ms);
         arr.pop_back();
+        arr_id.pop_back();
     }
     printf("THREAD %zd exit\n", n);
     return NULL;
 }
 TEST_F(ObjectPoolTest, test_multi_thread) {
+    using namespace xthread::base;
     const size_t thread_count = 2;
     pthread_t tid[thread_count];
     for(size_t i = 0; i < thread_count; ++i) {
@@ -192,16 +217,19 @@ TEST_F(ObjectPoolTest, test_multi_thread) {
 
     size_t n = 100;
     std::vector<TestObjectDyMark*> arr;
+    std::vector<ResourceId<TestObjectDyMark> > arr_id;
     arr.reserve(n);
     for(size_t i = 0; i < n; ++i) {
-        arr.push_back(xthread::base::get_object<TestObjectDyMark>(0));
+        ResourceId<TestObjectDyMark> id;
+        TestObjectDyMark* ptr = get_resource<TestObjectDyMark>(&id, 0);
+        arr_id.push_back(id);
+        arr.push_back(ptr);
         sleep_ms = rand() % 20;
         thread_sleep(sleep_ms);
     }
 
     for(size_t i = 0; i < n; ++i) {
-        TestObjectDyMark* ptr = arr.back();
-        xthread::base::return_object<TestObjectDyMark>(ptr);
+        xthread::base::return_resource<TestObjectDyMark>(arr_id.back());
         sleep_ms = rand() % 15;
         thread_sleep(sleep_ms);
         arr.pop_back();
