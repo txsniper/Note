@@ -10,6 +10,7 @@ set(HEADERS
     ./obj_pool/resource_pool.h
     ./obj_pool/resource_pool_in.h
     ./obj_pool/macro_defines.h
+    ./work_stealing_queue.h
 )
 install(FILES ${HEADERS} DESTINATION include/xthread/common)
 

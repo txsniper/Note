@@ -6,3 +6,6 @@ target_link_libraries(test_object_pool xthread_common xthread_base pthread gtest
 
 add_executable(test_resource_pool test_resource_pool.cpp)
 target_link_libraries(test_resource_pool xthread_common xthread_base pthread gtest)
+
+add_executable(test_work_stealing_queue test_work_stealing_queue.cpp)
+target_link_libraries(test_work_stealing_queue xthread_common xthread_base pthread gtest)
