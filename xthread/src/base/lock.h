@@ -37,6 +37,26 @@ public:
 private:
 	pthread_mutex_t mutex_;
 };
+
+class SpinLock : NonCopyable {
+public:
+    SpinLock() {
+        pthread_spin_init(&lock_, 0);
+    }
+    ~SpinLock() {
+        pthread_spin_destroy(&lock_);
+    }
+
+    void lock() {
+        pthread_spin_lock(&lock_);
+    }
+
+    void unlock() {
+        pthread_spin_unlock(&lock_);
+    }
+private:
+    pthread_spinlock_t lock_;
+};
 }
 }
 
