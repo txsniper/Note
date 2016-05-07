@@ -79,7 +79,7 @@ void* pop_thread(void* arg) {
 
 TEST_F(test_wsq_suite, sanity) {
     xthread::WorkStealingQueue<value_type> q;
-    ASSERT_EQ(0, q.init(N));
+    ASSERT_EQ(true, q.init(N));
     pthread_t rth[8];
     pthread_t wth, pop_th;
     for (size_t i = 0; i < ARRAY_SIZE(rth); ++i) {
